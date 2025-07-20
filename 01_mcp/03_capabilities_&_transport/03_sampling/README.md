@@ -1,203 +1,210 @@
-**Sampling in MCP: From Basics to Advanced**
+# [Sampling](https://modelcontextprotocol.io/specification/2025-06-18/client/sampling) - Giving Tools a Brain
 
----
+Why might a server want to ask a client to 'think' for it, instead of just doing everything itself?"
 
-## 1. What Is Sampling in MCP?
+> Sampling lets MCP servers delegate creative or complex reasoning to the client’s LLM, shifting cost and control. This enables tools that are more flexible, adaptive, and powerful. For example, instead of hardcoding a story generator, the server can ask the client’s LLM to write a story on demand. This requires stateful, bidirectional communication (StreamableHTTP).
 
-**Sampling** in the Model Context Protocol (MCP) is the mechanism by which an MCP **server** delegates the task of generating text (or other content) to an LLM via an MCP **client**, rather than calling the model directly itself. This lets servers leverage powerful AI reasoning without needing their own API keys—and keeps users in control of which model, provider, and prompt actually get executed ([Model Context Protocol][1]).
+## How Sampling Works
+The flow is straightforward:
+- Server completes its work (like fetching Wikipedia articles)
+- Server creates a prompt asking for text generation
+- Server sends a sampling request to the client
+- Client calls Claude with the provided prompt
+- Client returns the generated text to the server
+- Server uses the generated text in its response
 
-* **Why “sampling”?**
-  In LLM parlance, a “sample” is one generation (completion) from the model. MCP’s `sampling/createMessage` request wraps that generation in a secure, user-mediated flow.
+## 🧠 Core Challenge: When Should Tools "Think"?
 
-* **Key benefit:**
-  Servers remain simple web services, while clients (e.g. desktop apps) manage model access, handle user approval, enforce rate limits, and can even let users edit prompts or responses before—and after—generation ([Model Context Protocol][2]).
+**Scenario:** You're building a content generation tool. You have two options:
 
----
-
-## 2. Core Concepts
-
-### 2.1 Capability Declaration
-
-Before any sampling can occur, the client must announce it **supports** sampling. During initialization, the client includes:
-
-```json
-{
-  "capabilities": {
-    "sampling": {}
-  }
-}
-```
-
-This tells the server “I can handle your `sampling/createMessage` calls” ([Model Context Protocol][1]).
-
-### 2.2 Message Flow
-
-1. **Server → Client:** `sampling/createMessage` with
-
-   * **messages**: A chat-like array (e.g. role=user, content=`"What is the capital of France?"`)
-   * **modelPreferences**: Hints plus `costPriority`, `speedPriority`, `intelligencePriority`
-   * **systemPrompt**, **maxTokens**, etc.
-2. **Client ↔ User:** Optional human-in-the-loop review before sending the prompt on
-3. **Client → LLM:** Real call to the chosen model
-4. **LLM → Client:** Model’s response
-5. **Client ↔ User:** Review/edit generated content
-6. **Client → Server:** Final approved response ([Model Context Protocol][1]).
-
-
-<img src="image.png" alt="MCP Sampling Flow Diagram" width=500>
-
----
-
-## 3. Why Sampling? The “Think” vs. “Do” Divide
-
-* **Traditional tools** embed business logic and call models directly (if at all).
-* **Sampling-enabled tools** separate “what to do” (server code) from “how to think” (LLM runs on client) ([Model Context Protocol][2], [Wikipedia][3]).
-
-**When to choose sampling:**
-
-* You need **creative** or **adaptive** behavior (stories, summaries, explanations).
-* You want **provable security**: user reviews every model call.
-* You must **switch LLM providers** without changing server code.
-
----
-
-## 4. Architecture: Stateful HTTP Is Key
-
-Sampling requires the **server** to initiate calls **back** to the client, so simple REST (stateless HTTP) won’t work. Instead, MCP uses a **streamable HTTP** (WebSocket-like) or HTTP/2 stream where:
-
-* **Stateful HTTP (`stateless_http=False`)** keeps the connection open for bidirectional RPC.
-* **Stateless HTTP (`stateless_http=True`)** only supports server-to-client calls when the client opens the request itself—and can’t handle sampling ([DataCamp][4], [DEV Community][5]).
-
-**Server setup example:**
-
+**Option A: Let server call the llm-api**
 ```python
-mcp = FastMCP(name="sampling-server", stateless_http=False)
-mcp_app = mcp.streamable_http_app()
+def create_story(topic: str) -> str:
+    story_generated = f"Once upon a time, there was a {topic}. The end." # output of an llm call
+    return story_generated
 ```
 
----
-
-## 5. Step-by-Step Implementation
-
-### 5.1 Server Side
-
-1. **Declare stateful HTTP**:
-
-   ```python
-   mcp = FastMCP(name="mcp-sampling-server", stateless_http=False)
-   ```
-2. **Define your tool** with an async function and call `ctx.session.create_message(...)`:
-
-   ```python
-   @mcp.tool()
-   async def create_story(ctx: Context, topic: str) -> str:
-       result = await ctx.session.create_message(
-           messages=[ SamplingMessage(role="user", content=TextContent(type="text",
-                   text=f"Write a three-sentence story about: {topic}")) ],
-           max_tokens=100
-       )
-       return result.content.text
-   ```
-3. **Run your ASGI app**:
-
-   ```python
-   mcp_app = mcp.streamable_http_app()
-   uvicorn.run("server:mcp_app", port=8000)
-   ```
-
-### 5.2 Client Side
-
-1. **Initialize `ClientSession`** with a `sampling_callback`:
-
-   ```python
-   async with ClientSession(read_stream, write_stream, sampling_callback=mock_sampler) as session:
-       await session.initialize()
-   ```
-2. **Handle `sampling/createMessage`** in your callback:
-
-   ```python
-   async def mock_sampler(ctx, params):
-       # (Optional) user review here
-       response = await llm.generate(params)  # real LLM call
-       return CreateMessageResult(role="assistant", content=TextContent(text=response, type="text"), model="…")
-   ```
-3. **Review & return** the result to the server  The server’s tool resumes execution.
-
----
-
-## 6. Model Preferences & Hints
-
-Servers express **priorities** (0–1) for **cost**, **speed**, **intelligence**, and can give **hints** (substr-matches for model names). Clients map these to available models:
-
-```json
-"modelPreferences": {
-  "hints": [{ "name": "claude-3-sonnet" }],
-  "costPriority": 0.3,
-  "speedPriority": 0.8,
-  "intelligencePriority": 0.5
-}
+**Option B: AI-Powered Logic on Client Side**
+```python
+async def create_story(ctx: Context, topic: str) -> str:
+    # Ask the client's LLM to generate creative content
+    prompt = f"Write a creative story about: {topic}"
+    result = await ctx.sampling.create(messages=[...])
+    return result.content
 ```
 
-Clients then pick the best match from their roster (e.g. mapping “sonnet” to `gemini-1.5-pro` if Claude isn’t available) ([Model Context Protocol][1], [Wikipedia][3]).
+This flow allows clients to maintain control over model access, selection, and permissions while enabling servers to leverage AI capabilities—with no server API keys necessary.
 
----
+### The Power of Delegation
 
-## 7. Error Handling & Security
+**Sampling** represents a fundamental shift in tool design:
 
-* **Errors:** If the user rejects or something fails, return a JSON-RPC error:
+- **Traditional Tools:** Server contains all the logic and intelligence
+- **Sampling-Enabled Tools:** Server defines the process, client provides the intelligence
+- **Result:** Tools that can adapt, reason, and produce sophisticated outputs
 
-  ```json
-  {"error": {"code": -1, "message": "User rejected sampling request"}}
-  ```
-* **Best practices:**
+### Key MCP Concepts Illustrated
 
-  1. **Human-in-the-loop** controls: always let users approve prompts and outputs.
-  2. **Validate** inputs/outputs to avoid injection attacks.
-  3. **Rate-limit** requests to prevent abuse.
-  4. **Encrypt** sensitive data in transit. ([Model Context Protocol][1], [Wikipedia][3]).
+- **`sampling/create` (Request):** Server-to-client request for LLM inference
+- **Agentic Tools:** Tools that use AI reasoning as part of their workflow
+- **Stateful Connections:** Required for server-to-client communication
+- **Capability Negotiation:** Client declares sampling support during initialization
 
----
+## 🔑 Key MCP Sampling Concepts
 
-## 8. Advanced Topics
+### Message Flow
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: Initialize with sampling capability
+    S->>C: Tool request (create_story)
+    S->>C: sampling/createMessage
+    Note over C: LLM generates response
+    C->>S: Sampling response
+    S->>C: Tool response
+```
 
-* **Nested sampling:** Tools can call sampling **inside** other sampling or elicitation flows to build multi-step agents.
-* **Caching & Batching:** For repeated prompts, cache results on the client side. Batch multiple requests into one LLM call to improve throughput.
-* **Hybrid flows:** Combine sampling with **elicitation** (user prompts) and **roots** (project context) for fully agentic assistants.
-* **Monitoring & Metrics:** Instrument callback latency, model usage, and user-approval times to tune performance and cost.
+## When to Use Sampling
 
----
+Sampling is most valuable when building publicly accessible MCP servers. You don't want random users generating unlimited text at your expense. By using sampling, each client pays for their own AI usage while still benefiting from your server's functionality.
 
-## 9. Putting It All Together: A Minimal Example
+The technique essentially moves the AI integration complexity from your server to the client, which often already has the necessary connections and credentials in place.
 
+### Capability Declaration
+```python
+# Client declares sampling support
+capabilities = ClientCapabilities(
+    sampling=SamplingCapability(
+        models=["openai/gpt-4o-mini"]  # Supported models
+    )
+)
+```
+
+### Message Structure
+```python
+# Server sampling request
+result = await ctx.session.create_message(
+    messages=[
+        SamplingMessage(
+            role="user",
+            content=TextContent(
+                type="text", 
+                text="Write a story about..."
+            )
+        )
+    ],
+    max_tokens=100
+)
+```
+
+## 🏗️ Architecture Deep Dive
+
+### Why Stateful HTTP?
+
+**Traditional HTTP (Stateless):**
+```
+Client → Tool Request → Server
+Client ← Tool Response ← Server
+```
+
+**Sampling HTTP (Stateful):**
+```
+Client → Tool Request → Server
+Client ← Sampling Request ← Server  (Server asks client to think)
+Client → Sampling Response → Server
+Client ← Tool Response ← Server
+```
+
+**Key Point:** Sampling requires **bidirectional communication**. The server must be able to send requests back to the client, which requires maintaining connection state.
+
+## 📋 Hands-On Exercise: Build Your Own Sampling Tool
+
+### Step 1: Analyze the Given Implementation
+
+**🔍 Exploration Task:**
+1. Open `mcp_code/server.py`
+2. Find the `create_story` tool
+3. Identify where `ctx.sampling.create()` is called
+4. Trace how the prompt is constructed
+
+**💭 Reflection Questions:**
+- Why does the server construct the prompt instead of just passing the topic?
+- What would happen if `stateless_http=True`?
+- How does the server handle sampling failures?
+
+### Step 2: Extend the Implementation
+
+**🛠️ Coding Challenge:**
+Add a new tool called `analyze_sentiment` that:
+1. Takes a text input
+2. Uses sampling to analyze the sentiment
+3. Returns both sentiment and confidence level
+
+**Starter Code:**
 ```python
 @mcp.tool()
-async def summarize_document(ctx: Context, text: str) -> str:
-    # Step 1: Ask client to chunk & summarize
-    summary = await ctx.session.create_message(
-        messages=[ SamplingMessage(
-            role="user",
-            content=TextContent(type="text",
-                text=f"Summarize this document in three bullet points:\n\n{text}") ) ],
-        max_tokens=150
-    )
-    return summary.content.text
+async def analyze_sentiment(ctx: Context, text: str) -> str:
+    # TODO: Construct appropriate prompt for sentiment analysis
+    # TODO: Use ctx.sampling.create() to get AI analysis
+    # TODO: Parse and return structured results
+    pass
 ```
 
-* **Server** defines only “what”: summarization workflow.
-* **Client** handles “how”: model choice, user review, error handling.
+### Step 3: Test Your Understanding
+
+**🧪 Experiment:**
+1. Run the client with different story topics
+2. Observe how the AI generates different stories each time
+3. Try modifying the prompt to change the story style
+
+**📊 Questions to Explore:**
+- How does prompt engineering affect output quality?
+- What happens when the client's sampler fails?
+- How could you add validation to the sampling results?
+
+## 🚀 Running the Demo
+
+### Prerequisites
+```bash
+cd 01_sampling/mcp_code
+uv sync
+```
+
+### Execution Steps
+
+1. **Start with the Client:**
+   ```bash
+   uv run python client.py
+   ```
+
+2. **Observe the Flow:**
+   - Client declares sampling capability
+   - Client calls `create_story` tool
+   - Server receives request and uses sampling
+   - Client's sampler function is invoked
+   - Story flows back through the chain
+
+3. **Expected Output:**
+   ```
+   🎯 MCP Sampling Client - 2025-06-18 Demo
+   🔗 Connecting to sampling server...
+   ✅ Connected! Server: mcp-sampling-server
+   -> Client: Calling 'create_story' tool with topic: 'a function's adventure'
+   <- Client: Received 'sampling/create' request from server.
+   -> Client: Sending mock story back to the server.
+   🎉 Final Story Received from Server:
+   'In a world of shimmering code, a brave little function...'
+   ```
+
+## 🔄 Connection to Other Lessons
+
+**Building Foundation:**
+- **This Lesson:** Server delegates reasoning to client
+- **Next (Elicitation):** Server requests user input during execution
+- **Next (Roots):** Server discovers user's project context
+
+**Combined Power:**
+When used together, these capabilities enable AI assistants that can reason about code (sampling), ask clarifying questions (elicitation), and understand project context (roots).
 
 ---
-
-## 10. Next Steps & Mastery
-
-1. **Hands-on exercise:** Extend `create_story` to produce outlines, then chapters via two sampling calls.
-2. **Prompt engineering:** Experiment with system prompts (e.g. “You are an expert summarizer”) and compare outputs.
-3. **Security audit:** Test prompt-injection scenarios and build validation wrappers.
-
-By mastering these steps—from declaration through advanced nesting—you’ll be able to **explain**, **implement**, and **optimize** MCP sampling flows confidently.
-
-[1]: https://modelcontextprotocol.io/specification/2025-06-18/client/sampling?utm_source=chatgpt.com "Sampling - Model Context Protocol"
-[2]: https://modelcontextprotocol.io/docs/concepts/sampling?utm_source=chatgpt.com "Sampling - Model Context Protocol"
-[3]: https://en.wikipedia.org/wiki/Model_Context_Protocol?utm_source=chatgpt.com "Model Context Protocol"
-[4]: https://www.datacamp.com/tutorial/mcp-model-context-protocol?utm_source=chatgpt.com "Model Context Protocol (MCP): A Guide With Demo Project"
-[5]: https://dev.to/mehmetakar/model-context-protocol-mcp-tutorial-3nda?utm_source=chatgpt.com "Model Context Protocol (MCP) Tutorial - DEV Community"
