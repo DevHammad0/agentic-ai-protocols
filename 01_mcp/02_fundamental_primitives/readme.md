@@ -119,7 +119,7 @@ Prompts are pre-crafted instructions for common workflows. They are:
 ### Learning Resources
 - [Anthropic's MCP Course](https://anthropic.skilljar.com/introduction-to-model-context-protocol)
 - [MCP Server Inspector](https://github.com/modelcontextprotocol/server-inspector)
-- [JSON Schema Documentation](https://json-schema.org/learn/getting-started-step-by-step)
+- [Schema Reference](https://modelcontextprotocol.io/specification/2025-06-18/schema)
 
 
 ## 🚀 Next Steps
