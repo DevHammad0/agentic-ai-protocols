@@ -121,9 +121,6 @@ Prompts are pre-crafted instructions for common workflows. They are:
 - [MCP Server Inspector](https://github.com/modelcontextprotocol/server-inspector)
 - [JSON Schema Documentation](https://json-schema.org/learn/getting-started-step-by-step)
 
-### Community and Support
-- [MCP GitHub Discussions](https://github.com/modelcontextprotocol/python-sdk/discussions)
-- [MCP Discord Community](https://discord.gg/modelcontextprotocol)
 
 ## 🚀 Next Steps
 
