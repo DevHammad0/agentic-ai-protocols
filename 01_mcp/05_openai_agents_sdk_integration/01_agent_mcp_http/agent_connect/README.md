@@ -59,6 +59,27 @@ Processing request of type CallToolRequest    ← call 'greet_from_shared_server
 
 ---
 
+### 🧩 Why a `tools/list` Happens After Tool Call
+
+Even if you've already fetched the tool list and executed a tool, you may notice an unexpected `tools/list` **after** a `tool/call`. That’s not a bug — it’s part of how the agent generates its final response.
+
+Here’s what really happens:
+
+1. Agent sends query → receives a tool call plan.
+2. Agent executes the tool via `tool/call`.
+3. After execution, the agent prepares a **final LLM call** to generate the final response.
+4. Before making that last call, the SDK again invokes `list_tools()` — to re-include the tools in the `functions` parameter of the OpenAI-style chat format.
+
+This allows the model to still use another tool if needed, even after one was already used. It's part of the planner's final reasoning step.
+
+#### Key insight:
+
+This second `tools/list` happens **just before the final assistant message is generated**. The LLM may still want to use another tool, so the SDK plays it safe and fetches the list again — unless caching is enabled.
+
+> ✅ To prevent this extra `tools/list`, enable `cache_tools_list=True`.
+
+---
+
 ### 🔍 Why Does This Happen?
 
 The SDK does repeated `tools/list` calls by default to:
