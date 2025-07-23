@@ -29,7 +29,7 @@ def greet(name: str = "World") -> str:
 )
 def mood(name: str = "World") -> str:
     """A simple greeting tool."""
-    logger.info(f"Tool 'moo' called with name: {name}")
+    logger.info(f"Tool 'mood_from_shared_server' called with name: {name}")
     return "I am happy"
 
 # --- (Optional) Define a simple resource ---
