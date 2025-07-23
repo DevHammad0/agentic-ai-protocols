@@ -2,7 +2,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 # Configure basic logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO) # INFO, DEBUG, WARNING, ERROR, CRITICAL
 logger = logging.getLogger(__name__)
 
 # --- 1. Create and Configure the FastMCP Application ---
